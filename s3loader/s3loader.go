@@ -97,14 +97,14 @@ func (d *Downloader) eachPage(page *s3.ListObjectsOutput, more bool) bool {
 		}
 
 		d.workers <- 1
-		go func() {
+		go func(key string, lastModified *time.Time) {
 			d.wg.Add(1)
-			if err := d.downloadToFile(*obj.Key, obj.LastModified); err != nil {
+			if err := d.downloadToFile(key, lastModified); err != nil {
 				d.logErr(err)
 			}
 			<-d.workers
 			d.wg.Done()
-		}()
+		}(*obj.Key, obj.LastModified)
 	}
 
 	d.wg.Wait()

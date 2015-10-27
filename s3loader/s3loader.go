@@ -1,8 +1,8 @@
 package s3loader
 
 import (
+	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,84 +17,89 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 )
 
-// func Download(bucket, prefix, localDir, regPattern string, dryRun bool) error {
-func Download(inArgs *cfg.InArgs) error {
-	conf, err := cfg.GetCfg()
-	if err != nil {
-		return err
+var (
+	ErrInvalidArgs = errors.New("invalid  arguments")
+)
+
+type (
+	Downloader struct {
+		*s3manager.Downloader
+		args         *cfg.InArgs
+		regexp       *regexp.Regexp
+		pageLister   PageLister
+		pageIterator PageIterator
+		wg           sync.WaitGroup
+		workers      chan int
 	}
 
+	PageLister interface {
+		ListObjectsPages(params *s3.ListObjectsInput, pageIterator func(*s3.ListObjectsOutput, bool) bool) error
+	}
+
+	PageIterator interface {
+		Iterate(*s3.ListObjectsOutput, bool) bool
+	}
+
+	PageIteratorFunc func(*s3.ListObjectsOutput, bool) bool
+
+	// PageListerFunc func(params *s3.ListObjectsInput, pageIterator PageIteratorFunc) error
+)
+
+func (f PageIteratorFunc) Iterate(page *s3.ListObjectsOutput, more bool) bool {
+	return f(page, more)
+}
+
+func NewDownloader(agrs *cfg.InArgs, conf *cfg.Cfg) (*Downloader, error) {
+	if agrs == nil || conf == nil {
+		return nil, ErrInvalidArgs
+	}
 	creds := credentials.NewStaticCredentials(conf.AWSAccessKeyID, conf.AWSSecretKey, "")
 	if _, err := creds.Get(); err != nil {
-		return err
+		return nil, err
 	}
 
 	client := s3.New(&aws.Config{Credentials: creds, Region: aws.String(conf.Region)})
-
 	manager := NewS3DownloadManager(client)
-	d := NewDownloader(inArgs, manager)
 
-	params := &s3.ListObjectsInput{Bucket: &inArgs.Bucket, Prefix: &inArgs.Prefix}
-	if err := client.ListObjectsPages(params, d.eachPage()); err != nil {
-		return err
+	d := &Downloader{
+		Downloader: manager,
+		args:       agrs,
+		pageLister: client,
+		regexp:     regexp.MustCompile(agrs.Regexp),
+		workers:    make(chan int, 50),
 	}
 
+	d.pageIterator = d.pickPageIterator()
+	return d, nil
+}
+
+func (d *Downloader) Run() error {
+	params := &s3.ListObjectsInput{Bucket: &d.args.Bucket, Prefix: &d.args.Prefix}
+	if err := d.pageLister.ListObjectsPages(params, d.pageIterator.Iterate); err != nil {
+		return err
+	}
 	return nil
 }
 
-type (
-	DownloadManager interface {
-		Download(io.WriterAt, *s3.GetObjectInput) (int64, error)
-	}
-
-	S3DownloadManager struct {
-		*s3manager.Downloader
-	}
-
-	Downloader struct {
-		args            *cfg.InArgs
-		regexp          *regexp.Regexp
-		downloadManager DownloadManager
-		wg              sync.WaitGroup
-		workers         chan int
-	}
-)
-
-func NewDownloader(
-	agrs *cfg.InArgs,
-	manager *S3DownloadManager,
-) *Downloader {
-	return &Downloader{
-		args:            agrs,
-		downloadManager: manager,
-		regexp:          regexp.MustCompile(agrs.Regexp),
-		workers:         make(chan int, 50),
-	}
-}
-
-func NewS3DownloadManager(client *s3.S3) *S3DownloadManager {
-	downloader := s3manager.NewDownloader(&s3manager.DownloadOptions{
+func NewS3DownloadManager(client *s3.S3) *s3manager.Downloader {
+	return s3manager.NewDownloader(&s3manager.DownloadOptions{
 		PartSize:    s3manager.DefaultDownloadPartSize,
 		Concurrency: s3manager.DefaultDownloadConcurrency,
 		S3:          client,
 	})
-
-	return &S3DownloadManager{downloader}
 }
 
-type PageIteratorFunc func(*s3.ListObjectsOutput, bool) bool
-
-func (d *Downloader) eachPage() PageIteratorFunc {
+func (d *Downloader) pickPageIterator() PageIterator {
 	itemHandler := d.onItemDownload
 
 	if d.args.DryRun {
 		itemHandler = d.onItemSearch
 	}
 
-	return d.pageIterator(itemHandler)
+	return d.pageIteratorFunc(itemHandler)
 }
 
-func (d *Downloader) pageIterator(f func(*s3.Object)) PageIteratorFunc {
+func (d *Downloader) pageIteratorFunc(f func(*s3.Object)) PageIteratorFunc {
 	return func(page *s3.ListObjectsOutput, more bool) bool {
 		for _, obj := range page.Contents {
 			if !d.regexp.MatchString(*obj.Key) {
@@ -143,7 +148,8 @@ func (d *Downloader) downloadToFile(key string, lastModified *time.Time) error {
 	d.logInfo(fmt.Sprintf("> Downloading s3://%s/%s to %s...\n", d.args.Bucket, key, file))
 
 	params := &s3.GetObjectInput{Bucket: &d.args.Bucket, Key: &key}
-	_, err = d.downloadManager.Download(fd, params)
+	_, err = d.Download(fd, params)
+
 	if err != nil {
 		return err
 	}

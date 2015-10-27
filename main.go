@@ -31,7 +31,17 @@ func start() error {
 		return err
 	}
 
-	if err := s3loader.Download(&inArgs); err != nil {
+	conf, err := cfg.GetCfg()
+	if err != nil {
+		return err
+	}
+
+	d, err := s3loader.NewDownloader(&inArgs, conf)
+	if err != nil {
+		return err
+	}
+
+	if err := d.Run(); err != nil {
 		return err
 	}
 

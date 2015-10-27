@@ -35,7 +35,7 @@ func Download(inArgs *cfg.InArgs) error {
 	d := NewDownloader(inArgs.Bucket, inArgs.LocalDir, inArgs.Regexp, manager, inArgs.DryRun)
 
 	params := &s3.ListObjectsInput{Bucket: &inArgs.Bucket, Prefix: &inArgs.Prefix}
-	if err := client.ListObjectsPages(params, d.eachPage); err != nil {
+	if err := client.ListObjectsPages(params, d.eachPage()); err != nil {
 		return err
 	}
 
@@ -89,31 +89,50 @@ func NewS3DownloadManager(client *s3.S3) *S3DownloadManager {
 	return &S3DownloadManager{downloader}
 }
 
-func (d *Downloader) eachPage(page *s3.ListObjectsOutput, more bool) bool {
-	for _, obj := range page.Contents {
-		if !d.regexp.MatchString(*obj.Key) {
-			continue
-		}
+type PageIteratorFunc func(*s3.ListObjectsOutput, bool) bool
 
-		if d.dryRun {
-			d.logInfo(fmt.Sprintf("> Found: s3://%s/%s", d.bucket, *obj.Key))
-			continue
-		}
+func (d *Downloader) eachPage() PageIteratorFunc {
+	itemHandler := d.onItemDownload
 
-		d.workers <- 1
-		go func(key string, lastModified *time.Time) {
-			d.wg.Add(1)
-			if err := d.downloadToFile(key, lastModified); err != nil {
-				d.logErr(err)
-			}
-			<-d.workers
-			d.wg.Done()
-		}(*obj.Key, obj.LastModified)
+	if d.dryRun {
+		itemHandler = d.onItemSearch
 	}
 
-	d.wg.Wait()
+	return d.pageIterator(itemHandler)
+}
 
-	return true
+func (d *Downloader) pageIterator(f func(*s3.Object)) PageIteratorFunc {
+	return func(page *s3.ListObjectsOutput, more bool) bool {
+		for _, obj := range page.Contents {
+			if !d.regexp.MatchString(*obj.Key) {
+				continue
+			}
+
+			d.workers <- 1
+			d.wg.Add(1)
+
+			go func(obj *s3.Object) {
+				f(obj)
+
+				<-d.workers
+				d.wg.Done()
+			}(obj)
+		}
+
+		d.wg.Wait()
+
+		return true
+	}
+}
+
+func (d *Downloader) onItemSearch(obj *s3.Object) {
+	d.logInfo(fmt.Sprintf("> Found: s3://%s/%s", d.bucket, *obj.Key))
+}
+
+func (d *Downloader) onItemDownload(obj *s3.Object) {
+	if err := d.downloadToFile(*obj.Key, obj.LastModified); err != nil {
+		d.logErr(err)
+	}
 }
 
 func (d *Downloader) downloadToFile(key string, lastModified *time.Time) error {

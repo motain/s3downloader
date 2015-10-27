@@ -32,7 +32,7 @@ func Download(inArgs *cfg.InArgs) error {
 	client := s3.New(&aws.Config{Credentials: creds, Region: aws.String(conf.Region)})
 
 	manager := NewS3DownloadManager(client)
-	d := NewDownloader(inArgs.Bucket, inArgs.LocalDir, inArgs.Regexp, manager, inArgs.DryRun)
+	d := NewDownloader(inArgs, manager)
 
 	params := &s3.ListObjectsInput{Bucket: &inArgs.Bucket, Prefix: &inArgs.Prefix}
 	if err := client.ListObjectsPages(params, d.eachPage()); err != nil {
@@ -52,29 +52,22 @@ type (
 	}
 
 	Downloader struct {
-		dryRun          bool
-		downloadManager DownloadManager
-		bucket, dir     string
+		args            *cfg.InArgs
 		regexp          *regexp.Regexp
-		w               io.Writer
+		downloadManager DownloadManager
 		wg              sync.WaitGroup
 		workers         chan int
 	}
 )
 
 func NewDownloader(
-	bucket,
-	localDir,
-	regPattern string,
+	agrs *cfg.InArgs,
 	manager *S3DownloadManager,
-	dryRun bool,
 ) *Downloader {
 	return &Downloader{
-		bucket:          bucket,
-		dir:             localDir,
+		args:            agrs,
 		downloadManager: manager,
-		regexp:          regexp.MustCompile(regPattern),
-		dryRun:          dryRun,
+		regexp:          regexp.MustCompile(agrs.Regexp),
 		workers:         make(chan int, 50),
 	}
 }
@@ -94,7 +87,7 @@ type PageIteratorFunc func(*s3.ListObjectsOutput, bool) bool
 func (d *Downloader) eachPage() PageIteratorFunc {
 	itemHandler := d.onItemDownload
 
-	if d.dryRun {
+	if d.args.DryRun {
 		itemHandler = d.onItemSearch
 	}
 
@@ -126,7 +119,7 @@ func (d *Downloader) pageIterator(f func(*s3.Object)) PageIteratorFunc {
 }
 
 func (d *Downloader) onItemSearch(obj *s3.Object) {
-	d.logInfo(fmt.Sprintf("> Found: s3://%s/%s", d.bucket, *obj.Key))
+	d.logInfo(fmt.Sprintf("> Found: s3://%s/%s", d.args.Bucket, *obj.Key))
 }
 
 func (d *Downloader) onItemDownload(obj *s3.Object) {
@@ -136,7 +129,7 @@ func (d *Downloader) onItemDownload(obj *s3.Object) {
 }
 
 func (d *Downloader) downloadToFile(key string, lastModified *time.Time) error {
-	file := filepath.Join(d.dir, fmt.Sprintf("%s_%s", lastModified.Format(time.RFC3339), filepath.Base(key)))
+	file := generateDownloadFilename(key, d.args.LocalDir, d.args.PrependName, lastModified)
 	if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
 		return err
 	}
@@ -147,9 +140,9 @@ func (d *Downloader) downloadToFile(key string, lastModified *time.Time) error {
 	}
 
 	defer fd.Close()
-	d.logInfo(fmt.Sprintf("> Downloading s3://%s/%s to %s...\n", d.bucket, key, file))
+	d.logInfo(fmt.Sprintf("> Downloading s3://%s/%s to %s...\n", d.args.Bucket, key, file))
 
-	params := &s3.GetObjectInput{Bucket: &d.bucket, Key: &key}
+	params := &s3.GetObjectInput{Bucket: &d.args.Bucket, Key: &key}
 	_, err = d.downloadManager.Download(fd, params)
 	if err != nil {
 		return err
@@ -164,4 +157,14 @@ func (d *Downloader) logInfo(info string) {
 
 func (d *Downloader) logErr(err error) {
 	fmt.Println(err)
+}
+
+func generateDownloadFilename(key, dir string, prependName bool, lastModified *time.Time) string {
+	keyName := filepath.Base(key)
+
+	if prependName {
+		keyName = fmt.Sprintf("%s_%s", lastModified.Format(time.RFC3339), keyName)
+	}
+
+	return filepath.Join(dir, keyName)
 }

@@ -24,11 +24,12 @@ type (
 	}
 
 	InArgs struct {
-		Bucket   string
-		Prefix   string
-		LocalDir string
-		Regexp   string
-		DryRun   bool
+		Bucket      string
+		Prefix      string
+		LocalDir    string
+		Regexp      string
+		DryRun      bool
+		PrependName bool
 	}
 )
 

@@ -20,6 +20,7 @@ func parseFlags() {
 	flag.StringVar(&inArgs.LocalDir, "dir", inArgs.LocalDir, "Target local dir")
 	flag.StringVar(&inArgs.Regexp, "regexp", inArgs.Regexp, "Item name regular expression")
 	flag.BoolVar(&inArgs.DryRun, "dry-run", inArgs.DryRun, "Find only flag - no download")
+	flag.BoolVar(&inArgs.PrependName, "p", inArgs.PrependName, "Prepend downloaded file name with lastmodified timestamp")
 	flag.Parse()
 }
 

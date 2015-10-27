@@ -8,6 +8,12 @@ import (
 
 var inArgs = cfg.InArgs{Regexp: ".*"}
 
+func main() {
+	if err := start(); err != nil {
+		panic(err)
+	}
+}
+
 func parseFlags() {
 	flag.StringVar(&inArgs.Bucket, "bucket", inArgs.Bucket, "Download bucket")
 	flag.StringVar(&inArgs.Prefix, "prefix", inArgs.Prefix, "Bucket download path")
@@ -17,9 +23,16 @@ func parseFlags() {
 	flag.Parse()
 }
 
-func main() {
+func start() error {
 	parseFlags()
-	if err := s3loader.Download(&inArgs); err != nil {
-		panic(err)
+
+	if err := inArgs.Validate(); err != nil {
+		return err
 	}
+
+	if err := s3loader.Download(&inArgs); err != nil {
+		return err
+	}
+
+	return nil
 }

@@ -2,9 +2,9 @@ package cfg
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
-	"os"
 	"path/filepath"
 	"sync"
 )
@@ -12,6 +12,8 @@ import (
 var (
 	mu     sync.Mutex
 	config *Cfg
+
+	ErrUndefinedBucket = errors.New("bucket is not defined")
 )
 
 type (
@@ -30,23 +32,32 @@ type (
 	}
 )
 
-func GetCfg() *Cfg {
-	if nil == config {
-		mu.Lock()
-		defer mu.Unlock()
-
-		err := loadCfg()
-		if err != nil {
-			fmt.Println(">", err)
-			os.Exit(0)
-		}
+func GetCfg() (*Cfg, error) {
+	if config != nil {
+		return config, nil
 	}
 
-	return config
+	mu.Lock()
+	defer mu.Unlock()
+
+	err := loadCfg()
+	if err != nil {
+		return nil, err
+	}
+
+	return config, nil
+}
+
+func (in *InArgs) Validate() error {
+	if in.Bucket == "" {
+		return ErrUndefinedBucket
+	}
+
+	return nil
 }
 
 func loadCfg() error {
-	errfmt := "fs.loadCfg error: %s"
+	errfmt := "loadCfg error: %s"
 
 	b, err := load("config.json")
 	if err != nil {

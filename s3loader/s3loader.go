@@ -19,7 +19,10 @@ import (
 
 // func Download(bucket, prefix, localDir, regPattern string, dryRun bool) error {
 func Download(inArgs *cfg.InArgs) error {
-	conf := cfg.GetCfg()
+	conf, err := cfg.GetCfg()
+	if err != nil {
+		return err
+	}
 
 	creds := credentials.NewStaticCredentials(conf.AWSAccessKeyID, conf.AWSSecretKey, "")
 	if _, err := creds.Get(); err != nil {

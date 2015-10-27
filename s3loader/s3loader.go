@@ -1,8 +1,8 @@
 package s3loader
 
 import (
+	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,103 +17,124 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 )
 
-func Download(bucket, prefix, localDir, regPattern string, dryRun bool) error {
-	conf := cfg.GetCfg()
+var (
+	ErrInvalidArgs = errors.New("invalid  arguments")
+)
 
+type (
+	Downloader struct {
+		*s3manager.Downloader
+		args         *cfg.InArgs
+		regexp       *regexp.Regexp
+		pageLister   PageLister
+		pageIterator PageIterator
+		wg           sync.WaitGroup
+		workers      chan int
+	}
+
+	PageLister interface {
+		ListObjectsPages(params *s3.ListObjectsInput, pageIterator func(*s3.ListObjectsOutput, bool) bool) error
+	}
+
+	PageIterator interface {
+		Iterate(*s3.ListObjectsOutput, bool) bool
+	}
+
+	PageIteratorFunc func(*s3.ListObjectsOutput, bool) bool
+
+	// PageListerFunc func(params *s3.ListObjectsInput, pageIterator PageIteratorFunc) error
+)
+
+func (f PageIteratorFunc) Iterate(page *s3.ListObjectsOutput, more bool) bool {
+	return f(page, more)
+}
+
+func NewDownloader(agrs *cfg.InArgs, conf *cfg.Cfg) (*Downloader, error) {
+	if agrs == nil || conf == nil {
+		return nil, ErrInvalidArgs
+	}
 	creds := credentials.NewStaticCredentials(conf.AWSAccessKeyID, conf.AWSSecretKey, "")
 	if _, err := creds.Get(); err != nil {
-		return err
+		return nil, err
 	}
 
 	client := s3.New(&aws.Config{Credentials: creds, Region: aws.String(conf.Region)})
-
 	manager := NewS3DownloadManager(client)
-	d := NewDownloader(bucket, localDir, regPattern, manager, dryRun)
 
-	params := &s3.ListObjectsInput{Bucket: &bucket, Prefix: &prefix}
-	if err := client.ListObjectsPages(params, d.eachPage); err != nil {
-		return err
+	d := &Downloader{
+		Downloader: manager,
+		args:       agrs,
+		pageLister: client,
+		regexp:     regexp.MustCompile(agrs.Regexp),
+		workers:    make(chan int, 50),
 	}
 
+	d.pageIterator = d.pickPageIterator()
+	return d, nil
+}
+
+func (d *Downloader) Run() error {
+	params := &s3.ListObjectsInput{Bucket: &d.args.Bucket, Prefix: &d.args.Prefix}
+	if err := d.pageLister.ListObjectsPages(params, d.pageIterator.Iterate); err != nil {
+		return err
+	}
 	return nil
 }
 
-type (
-	DownloadManager interface {
-		Download(io.WriterAt, *s3.GetObjectInput) (int64, error)
-	}
-
-	S3DownloadManager struct {
-		*s3manager.Downloader
-	}
-
-	Downloader struct {
-		dryRun          bool
-		downloadManager DownloadManager
-		bucket, dir     string
-		regexp          *regexp.Regexp
-		w               io.Writer
-		wg              sync.WaitGroup
-		workers         chan int
-	}
-)
-
-func NewDownloader(
-	bucket,
-	localDir,
-	regPattern string,
-	manager *S3DownloadManager,
-	dryRun bool,
-) *Downloader {
-	return &Downloader{
-		bucket:          bucket,
-		dir:             localDir,
-		downloadManager: manager,
-		regexp:          regexp.MustCompile(regPattern),
-		dryRun:          dryRun,
-		workers:         make(chan int, 50),
-	}
-}
-
-func NewS3DownloadManager(client *s3.S3) *S3DownloadManager {
-	downloader := s3manager.NewDownloader(&s3manager.DownloadOptions{
+func NewS3DownloadManager(client *s3.S3) *s3manager.Downloader {
+	return s3manager.NewDownloader(&s3manager.DownloadOptions{
 		PartSize:    s3manager.DefaultDownloadPartSize,
 		Concurrency: s3manager.DefaultDownloadConcurrency,
 		S3:          client,
 	})
-
-	return &S3DownloadManager{downloader}
 }
 
-func (d *Downloader) eachPage(page *s3.ListObjectsOutput, more bool) bool {
-	for _, obj := range page.Contents {
-		if !d.regexp.MatchString(*obj.Key) {
-			continue
-		}
+func (d *Downloader) pickPageIterator() PageIterator {
+	itemHandler := d.onItemDownload
 
-		if d.dryRun {
-			d.logInfo(fmt.Sprintf("> Found: s3://%s/%s", d.bucket, *obj.Key))
-			continue
-		}
-
-		d.workers <- 1
-		go func(key string, lastModified *time.Time) {
-			d.wg.Add(1)
-			if err := d.downloadToFile(key, lastModified); err != nil {
-				d.logErr(err)
-			}
-			<-d.workers
-			d.wg.Done()
-		}(*obj.Key, obj.LastModified)
+	if d.args.DryRun {
+		itemHandler = d.onItemSearch
 	}
 
-	d.wg.Wait()
+	return d.pageIteratorFunc(itemHandler)
+}
 
-	return true
+func (d *Downloader) pageIteratorFunc(f func(*s3.Object)) PageIteratorFunc {
+	return func(page *s3.ListObjectsOutput, more bool) bool {
+		for _, obj := range page.Contents {
+			if !d.regexp.MatchString(*obj.Key) {
+				continue
+			}
+
+			d.workers <- 1
+			d.wg.Add(1)
+
+			go func(obj *s3.Object) {
+				f(obj)
+
+				<-d.workers
+				d.wg.Done()
+			}(obj)
+		}
+
+		d.wg.Wait()
+
+		return true
+	}
+}
+
+func (d *Downloader) onItemSearch(obj *s3.Object) {
+	d.logInfo(fmt.Sprintf("> Found: s3://%s/%s", d.args.Bucket, *obj.Key))
+}
+
+func (d *Downloader) onItemDownload(obj *s3.Object) {
+	if err := d.downloadToFile(*obj.Key, obj.LastModified); err != nil {
+		d.logErr(err)
+	}
 }
 
 func (d *Downloader) downloadToFile(key string, lastModified *time.Time) error {
-	file := filepath.Join(d.dir, fmt.Sprintf("%s_%s", lastModified.Format(time.RFC3339), filepath.Base(key)))
+	file := generateDownloadFilename(key, d.args.LocalDir, d.args.PrependName, lastModified)
 	if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
 		return err
 	}
@@ -124,10 +145,11 @@ func (d *Downloader) downloadToFile(key string, lastModified *time.Time) error {
 	}
 
 	defer fd.Close()
-	d.logInfo(fmt.Sprintf("> Downloading s3://%s/%s to %s...\n", d.bucket, key, file))
+	d.logInfo(fmt.Sprintf("> Downloading s3://%s/%s to %s...\n", d.args.Bucket, key, file))
 
-	params := &s3.GetObjectInput{Bucket: &d.bucket, Key: &key}
-	_, err = d.downloadManager.Download(fd, params)
+	params := &s3.GetObjectInput{Bucket: &d.args.Bucket, Key: &key}
+	_, err = d.Download(fd, params)
+
 	if err != nil {
 		return err
 	}
@@ -141,4 +163,14 @@ func (d *Downloader) logInfo(info string) {
 
 func (d *Downloader) logErr(err error) {
 	fmt.Println(err)
+}
+
+func generateDownloadFilename(key, dir string, prependName bool, lastModified *time.Time) string {
+	keyName := filepath.Base(key)
+
+	if prependName {
+		keyName = fmt.Sprintf("%s_%s", lastModified.Format(time.RFC3339), keyName)
+	}
+
+	return filepath.Join(dir, keyName)
 }

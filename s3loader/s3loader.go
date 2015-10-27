@@ -17,7 +17,8 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 )
 
-func Download(bucket, prefix, localDir, regPattern string, dryRun bool) error {
+// func Download(bucket, prefix, localDir, regPattern string, dryRun bool) error {
+func Download(inArgs *cfg.InArgs) error {
 	conf := cfg.GetCfg()
 
 	creds := credentials.NewStaticCredentials(conf.AWSAccessKeyID, conf.AWSSecretKey, "")
@@ -28,9 +29,9 @@ func Download(bucket, prefix, localDir, regPattern string, dryRun bool) error {
 	client := s3.New(&aws.Config{Credentials: creds, Region: aws.String(conf.Region)})
 
 	manager := NewS3DownloadManager(client)
-	d := NewDownloader(bucket, localDir, regPattern, manager, dryRun)
+	d := NewDownloader(inArgs.Bucket, inArgs.LocalDir, inArgs.Regexp, manager, inArgs.DryRun)
 
-	params := &s3.ListObjectsInput{Bucket: &bucket, Prefix: &prefix}
+	params := &s3.ListObjectsInput{Bucket: &inArgs.Bucket, Prefix: &inArgs.Prefix}
 	if err := client.ListObjectsPages(params, d.eachPage); err != nil {
 		return err
 	}

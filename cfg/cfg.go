@@ -14,11 +14,21 @@ var (
 	config *Cfg
 )
 
-type Cfg struct {
-	AWSAccessKeyID string `json:"aws_access_key_id"`
-	AWSSecretKey   string `json:"aws_secret_key"`
-	Region         string `json:"region"`
-}
+type (
+	Cfg struct {
+		AWSAccessKeyID string `json:"aws_access_key_id"`
+		AWSSecretKey   string `json:"aws_secret_key"`
+		Region         string `json:"region"`
+	}
+
+	InArgs struct {
+		Bucket   string
+		Prefix   string
+		LocalDir string
+		Regexp   string
+		DryRun   bool
+	}
+)
 
 func GetCfg() *Cfg {
 	if nil == config {

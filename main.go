@@ -2,31 +2,24 @@ package main
 
 import (
 	"flag"
-
+	"github.com/motain/s3downloader/cfg"
 	"github.com/motain/s3downloader/s3loader"
 )
 
-var (
-	bucket   string
-	prefix   string
-	localDir string
-	regexp   string = ".*"
-	dryRun   bool
-)
+var inArgs = cfg.InArgs{Regexp: ".*"}
 
 func parseFlags() {
-	flag.StringVar(&bucket, "bucket", bucket, "Download bucket")
-	flag.StringVar(&prefix, "prefix", prefix, "Bucket download path")
-	flag.StringVar(&localDir, "dir", localDir, "Target local dir")
-	flag.StringVar(&regexp, "regexp", regexp, "Item name regular expression")
-
-	flag.BoolVar(&dryRun, "dry-run", dryRun, "Find only flag - no download")
+	flag.StringVar(&inArgs.Bucket, "bucket", inArgs.Bucket, "Download bucket")
+	flag.StringVar(&inArgs.Prefix, "prefix", inArgs.Prefix, "Bucket download path")
+	flag.StringVar(&inArgs.LocalDir, "dir", inArgs.LocalDir, "Target local dir")
+	flag.StringVar(&inArgs.Regexp, "regexp", inArgs.Regexp, "Item name regular expression")
+	flag.BoolVar(&inArgs.DryRun, "dry-run", inArgs.DryRun, "Find only flag - no download")
 	flag.Parse()
 }
 
 func main() {
 	parseFlags()
-	if err := s3loader.Download(bucket, prefix, localDir, regexp, dryRun); err != nil {
+	if err := s3loader.Download(&inArgs); err != nil {
 		panic(err)
 	}
 }

@@ -3,6 +3,8 @@ package s3loader
 import (
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -18,37 +20,54 @@ import (
 )
 
 var (
-	ErrInvalidArgs = errors.New("invalid  arguments")
+	ErrInvalidArgs = errors.New("invalid arguments")
+
+	infoLog  = log.New(os.Stdout, "INFO: ", log.LstdFlags)
+	errorLog = log.New(os.Stdout, "ERR: ", log.LstdFlags)
 )
 
 type (
+	// DownloadManager describes logic for saving an s3 item to disc
+	DownloadManager interface {
+		Download(io.WriterAt, *s3.GetObjectInput) (int64, error)
+	}
+
+	// Downloader is a wrapper for DownloadManager
+	// Downloader handles additional input parameter
+	// and concurrency logic
 	Downloader struct {
-		*s3manager.Downloader
-		args         *cfg.InArgs
-		regexp       *regexp.Regexp
-		pageLister   PageLister
-		pageIterator PageIterator
-		wg           sync.WaitGroup
-		workers      chan int
+		args            *cfg.InArgs
+		regexp          *regexp.Regexp
+		downloadManager DownloadManager
+		pageLister      PageLister
+		pageIterator    PageIterator
+		fileCreator     fileCreator
+		wg              sync.WaitGroup
+		workers         chan int
 	}
+)
 
-	PageLister interface {
-		ListObjectsPages(params *s3.ListObjectsInput, pageIterator func(*s3.ListObjectsOutput, bool) bool) error
-	}
-
+type (
+	// PageIterator describes logic for every s3 item
 	PageIterator interface {
 		Iterate(*s3.ListObjectsOutput, bool) bool
 	}
 
+	// PageIteratorFunc is a PageIterator wrapper
 	PageIteratorFunc func(*s3.ListObjectsOutput, bool) bool
 
-	// PageListerFunc func(params *s3.ListObjectsInput, pageIterator PageIteratorFunc) error
+	// PageLister describes logic for handling s3 page items
+	PageLister interface {
+		ListObjectsPages(params *s3.ListObjectsInput, pageIterator func(*s3.ListObjectsOutput, bool) bool) error
+	}
 )
 
+// Iterate calls f(page, more)
 func (f PageIteratorFunc) Iterate(page *s3.ListObjectsOutput, more bool) bool {
 	return f(page, more)
 }
 
+// NewDownloader inits and returns a Downloader pointer
 func NewDownloader(agrs *cfg.InArgs, conf *cfg.Cfg) (*Downloader, error) {
 	if agrs == nil || conf == nil {
 		return nil, ErrInvalidArgs
@@ -62,17 +81,19 @@ func NewDownloader(agrs *cfg.InArgs, conf *cfg.Cfg) (*Downloader, error) {
 	manager := NewS3DownloadManager(client)
 
 	d := &Downloader{
-		Downloader: manager,
-		args:       agrs,
-		pageLister: client,
-		regexp:     regexp.MustCompile(agrs.Regexp),
-		workers:    make(chan int, 50),
+		downloadManager: manager,
+		args:            agrs,
+		pageLister:      client,
+		regexp:          regexp.MustCompile(agrs.Regexp),
+		workers:         make(chan int, 50),
+		fileCreator:     &fsAdapter{},
 	}
 
 	d.pageIterator = d.pickPageIterator()
 	return d, nil
 }
 
+// Run starts a downloader - s3 file download or search
 func (d *Downloader) Run() error {
 	params := &s3.ListObjectsInput{Bucket: &d.args.Bucket, Prefix: &d.args.Prefix}
 	if err := d.pageLister.ListObjectsPages(params, d.pageIterator.Iterate); err != nil {
@@ -81,6 +102,8 @@ func (d *Downloader) Run() error {
 	return nil
 }
 
+// NewS3DownloadManager inits with defaults and returns
+// a *s3manager.Downloader
 func NewS3DownloadManager(client *s3.S3) *s3manager.Downloader {
 	return s3manager.NewDownloader(&s3manager.DownloadOptions{
 		PartSize:    s3manager.DefaultDownloadPartSize,
@@ -124,32 +147,55 @@ func (d *Downloader) pageIteratorFunc(f func(*s3.Object)) PageIteratorFunc {
 }
 
 func (d *Downloader) onItemSearch(obj *s3.Object) {
-	d.logInfo(fmt.Sprintf("> Found: s3://%s/%s", d.args.Bucket, *obj.Key))
+	infoLog.Printf("Found: s3://%s/%s", d.args.Bucket, *obj.Key)
 }
 
 func (d *Downloader) onItemDownload(obj *s3.Object) {
 	if err := d.downloadToFile(*obj.Key, obj.LastModified); err != nil {
-		d.logErr(err)
+		errorLog.Println(err)
 	}
 }
 
-func (d *Downloader) downloadToFile(key string, lastModified *time.Time) error {
-	file := generateDownloadFilename(key, d.args.LocalDir, d.args.PrependName, lastModified)
-	if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
-		return err
+type (
+	// fileCreator describes file and dir create logic
+	fileCreator interface {
+		Create(f string) (*os.File, error)
 	}
 
-	fd, err := os.Create(file)
+	// fsAdapter implements fileCreator interface
+	fsAdapter struct{}
+)
+
+// Create creates file with a given name and returns file descriptor
+func (*fsAdapter) Create(fname string) (*os.File, error) {
+	dir := filepath.Dir(fname)
+
+	_, err := os.Stat(dir)
+	if err != nil && os.IsNotExist(err) {
+		err = os.MkdirAll(dir, 0755)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return os.Create(fname)
+}
+
+// downloadToFile downloads s3 file to filesystem
+func (d *Downloader) downloadToFile(key string, lastModified *time.Time) error {
+	fname := generateDownloadFilename(key, d.args.LocalDir, d.args.PrependName, lastModified)
+
+	fd, err := d.fileCreator.Create(fname)
 	if err != nil {
 		return err
 	}
 
 	defer fd.Close()
-	d.logInfo(fmt.Sprintf("> Downloading s3://%s/%s to %s...\n", d.args.Bucket, key, file))
+	infoLog.Printf("Downloading s3://%s/%s to %s...\n", d.args.Bucket, key, fname)
 
 	params := &s3.GetObjectInput{Bucket: &d.args.Bucket, Key: &key}
-	_, err = d.Download(fd, params)
-
+	_, err = d.downloadManager.Download(fd, params)
 	if err != nil {
 		return err
 	}
@@ -157,14 +203,7 @@ func (d *Downloader) downloadToFile(key string, lastModified *time.Time) error {
 	return nil
 }
 
-func (d *Downloader) logInfo(info string) {
-	fmt.Println(info)
-}
-
-func (d *Downloader) logErr(err error) {
-	fmt.Println(err)
-}
-
+// generateDownloadFilename returns file name of downloaded s3 item
 func generateDownloadFilename(key, dir string, prependName bool, lastModified *time.Time) string {
 	keyName := filepath.Base(key)
 

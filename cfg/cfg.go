@@ -43,7 +43,7 @@ func GetCfg() (*Cfg, error) {
 
 	err := loadCfg()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cfg.GetCfg: %s", err)
 	}
 
 	return config, nil
@@ -58,16 +58,14 @@ func (in *InArgs) Validate() error {
 }
 
 func loadCfg() error {
-	errfmt := "loadCfg error: %s"
-
 	b, err := load("config.json")
 	if err != nil {
-		return fmt.Errorf(errfmt, err)
+		return err
 	}
 
 	var cfg Cfg
 	if err := json.Unmarshal(b, &cfg); err != nil {
-		return fmt.Errorf(errfmt, err)
+		return err
 	}
 
 	config = &cfg

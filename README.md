@@ -38,3 +38,7 @@ s3downloader -bucket=mybucket -prefix=docs/backup -dir=/localdir -p
 // download only files with "txt" extention from s3://mybucket  
 s3downloader -bucket=mybucket -regexp=^*\\.txt$
 ```
+
+License
+-------
+See the [LICENSE](LICENSE.txt) file for license rights and limitations (MIT).

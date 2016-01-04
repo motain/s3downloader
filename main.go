@@ -7,7 +7,7 @@ import (
 	"github.com/motain/s3downloader/s3loader"
 )
 
-var inArgs = cfg.InArgs{Regexp: ".*"}
+var inArgs = cfg.InArgs{Regexp: ".*", LocalDir: "downloads-s3"}
 
 func main() {
 	if err := start(); err != nil {
@@ -23,7 +23,6 @@ func parseFlags() {
 	flag.BoolVar(&inArgs.DryRun, "dry-run", inArgs.DryRun, "Find only flag - no download")
 	flag.BoolVar(&inArgs.PrependName, "p", inArgs.PrependName, "Prepend downloaded file name with lastmodified timestamp")
 	flag.Parse()
-
 }
 
 func start() error {

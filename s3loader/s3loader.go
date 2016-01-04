@@ -151,6 +151,10 @@ func (d *Downloader) onItemSearch(obj *s3.Object) {
 }
 
 func (d *Downloader) onItemDownload(obj *s3.Object) {
+	if *obj.Size == 0 {
+		return
+	}
+
 	if err := d.downloadToFile(*obj.Key, obj.LastModified); err != nil {
 		errorLog.Println(err)
 	}

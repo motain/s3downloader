@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"io/ioutil"
 	"path/filepath"
+	"runtime"
 	"sync"
 )
 
 var (
-	mu     sync.Mutex
+	once   sync.Once
 	config *Cfg
 
 	ErrUndefinedBucket = errors.New("bucket is not defined")
@@ -34,14 +35,11 @@ type (
 )
 
 func GetCfg() (*Cfg, error) {
-	if config != nil {
-		return config, nil
-	}
+	var err error
+	once.Do(func() {
+		err = loadCfg()
+	})
 
-	mu.Lock()
-	defer mu.Unlock()
-
-	err := loadCfg()
 	if err != nil {
 		return nil, fmt.Errorf("cfg.GetCfg: %s", err)
 	}
@@ -73,7 +71,9 @@ func loadCfg() error {
 }
 
 func load(fname string) ([]byte, error) {
-	dir, err := filepath.Abs(filepath.Dir("./"))
+	_, callerName, _, _ := runtime.Caller(0)
+
+	dir, err := filepath.Abs(filepath.Join(filepath.Dir(callerName), "/../"))
 	if err != nil {
 		return nil, err
 	}

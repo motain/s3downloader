@@ -2,11 +2,12 @@ package main
 
 import (
 	"flag"
+
 	"github.com/motain/s3downloader/cfg"
 	"github.com/motain/s3downloader/s3loader"
 )
 
-var inArgs = cfg.InArgs{Regexp: ".*"}
+var inArgs = cfg.InArgs{Regexp: ".*", LocalDir: "downloads-s3"}
 
 func main() {
 	if err := start(); err != nil {

@@ -1,5 +1,6 @@
 S3downloader
 ------------
+[![Build Status](https://travis-ci.org/motain/s3downloader.svg?branch=master)](https://travis-ci.org/motain/s3downloader)
 
 Download data from s3 to a local dir
 

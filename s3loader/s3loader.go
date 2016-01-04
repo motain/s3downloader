@@ -11,12 +11,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/motain/s3downloader/cfg"
-
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/client"
 	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
+
+	"github.com/motain/s3downloader/cfg"
 )
 
 var (
@@ -29,7 +31,7 @@ var (
 type (
 	// DownloadManager describes logic for saving an s3 item to disc
 	DownloadManager interface {
-		Download(io.WriterAt, *s3.GetObjectInput) (int64, error)
+		Download(io.WriterAt, *s3.GetObjectInput, ...func(*s3manager.Downloader)) (int64, error)
 	}
 
 	// Downloader is a wrapper for DownloadManager
@@ -77,8 +79,11 @@ func NewDownloader(agrs *cfg.InArgs, conf *cfg.Cfg) (*Downloader, error) {
 		return nil, err
 	}
 
-	client := s3.New(&aws.Config{Credentials: creds, Region: aws.String(conf.Region)})
-	manager := NewS3DownloadManager(client)
+	awsConf := &aws.Config{Credentials: creds, Region: aws.String(conf.Region)}
+	sess := session.New(awsConf)
+	client := s3.New(sess, awsConf)
+
+	manager := NewS3DownloadManager(sess)
 
 	d := &Downloader{
 		downloadManager: manager,
@@ -104,12 +109,8 @@ func (d *Downloader) Run() error {
 
 // NewS3DownloadManager inits with defaults and returns
 // a *s3manager.Downloader
-func NewS3DownloadManager(client *s3.S3) *s3manager.Downloader {
-	return s3manager.NewDownloader(&s3manager.DownloadOptions{
-		PartSize:    s3manager.DefaultDownloadPartSize,
-		Concurrency: s3manager.DefaultDownloadConcurrency,
-		S3:          client,
-	})
+func NewS3DownloadManager(c client.ConfigProvider) *s3manager.Downloader {
+	return s3manager.NewDownloader(c)
 }
 
 func (d *Downloader) pickPageIterator() PageIterator {

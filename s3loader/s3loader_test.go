@@ -10,6 +10,7 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 
 	"github.com/motain/s3downloader/cfg"
 )
@@ -84,7 +85,7 @@ func TestDownloaderRunDownloadSuccess(t *testing.T) {
 	}
 
 	mockDownloadManager := &mockDownloadManager{
-		downloadFunc: func(w io.WriterAt, params *s3.GetObjectInput) (int64, error) {
+		downloadFunc: func(w io.WriterAt, params *s3.GetObjectInput, options ...func(*s3manager.Downloader)) (int64, error) {
 			return 5, nil
 		},
 	}
@@ -94,7 +95,7 @@ func TestDownloaderRunDownloadSuccess(t *testing.T) {
 			now := time.Now().UTC()
 			s3output := &s3.ListObjectsOutput{
 				Contents: []*s3.Object{
-					{Key: aws.String("testkey"), LastModified: &now},
+					{Key: aws.String("testkey"), LastModified: &now, Size: aws.Int64(5)},
 				},
 			}
 

@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 )
 
 type mockFileCreator struct {
@@ -16,11 +17,11 @@ func (fc mockFileCreator) Create(fname string) (*os.File, error) {
 }
 
 type mockDownloadManager struct {
-	downloadFunc func(io.WriterAt, *s3.GetObjectInput) (int64, error)
+	downloadFunc func(io.WriterAt, *s3.GetObjectInput, ...func(*s3manager.Downloader)) (int64, error)
 }
 
-func (d *mockDownloadManager) Download(w io.WriterAt, params *s3.GetObjectInput) (int64, error) {
-	return d.downloadFunc(w, params)
+func (d *mockDownloadManager) Download(w io.WriterAt, params *s3.GetObjectInput, options ...func(*s3manager.Downloader)) (int64, error) {
+	return d.downloadFunc(w, params, options...)
 }
 
 type mockPageLister struct {

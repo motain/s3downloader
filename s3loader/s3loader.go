@@ -1,3 +1,4 @@
+// Package s3loader wraps up aws sdk s3manager functionality
 package s3loader
 
 import (

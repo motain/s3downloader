@@ -1,6 +1,7 @@
 S3downloader
 ------------
 [![Build Status](https://travis-ci.org/motain/s3downloader.svg?branch=master)](https://travis-ci.org/motain/s3downloader)
+[![GoDoc](https://godoc.org/github.com/motain/s3downloader?status.svg)](https://godoc.org/github.com/motain/s3downloader)
 
 Download data from s3 to a local dir
 

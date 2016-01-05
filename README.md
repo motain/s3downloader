@@ -4,6 +4,11 @@ S3downloader
 
 Download data from s3 to a local dir
 
+Install
+-------
+
+`go get -t -u github.com/motain/s3downloader`
+
 Usage
 -----
 
@@ -11,7 +16,7 @@ Usage
 
 `cp config.json.dist config.json`
 
-- For available options run `./s3downloader -h`
+- For available options run `s3downloader -h`
 
 #### Example 1
 

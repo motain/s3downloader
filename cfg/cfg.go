@@ -1,3 +1,4 @@
+// Package cfg handles s3downloader app config load logic
 package cfg
 
 import (
@@ -18,12 +19,14 @@ var (
 )
 
 type (
+	// Cfg contains deserialized app config data
 	Cfg struct {
 		AWSAccessKeyID string `json:"aws_access_key_id"`
 		AWSSecretKey   string `json:"aws_secret_key"`
 		Region         string `json:"region"`
 	}
 
+	// InArgs contains input flag argument values
 	InArgs struct {
 		Bucket      string
 		Prefix      string
@@ -34,6 +37,8 @@ type (
 	}
 )
 
+// GetCfg loads app config from disc into singletone
+// and returns loaded value
 func GetCfg() (*Cfg, error) {
 	var err error
 	once.Do(func() {
@@ -47,6 +52,8 @@ func GetCfg() (*Cfg, error) {
 	return config, nil
 }
 
+// Validate returns an error if InArgs
+// contain an invalid value
 func (in *InArgs) Validate() error {
 	if in.Bucket == "" {
 		return ErrUndefinedBucket

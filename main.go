@@ -1,3 +1,6 @@
+// s3downloader cmd is an aws go sdk wrapper
+// which utilizes go concurrency patterns for efficient
+// and fast AWS s3 data search and download
 package main
 
 import (

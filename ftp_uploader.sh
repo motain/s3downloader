@@ -11,13 +11,12 @@ USAGE='
 
 '
 
-USER=erakhimberdin
 WATCHING_FOLDER=/sharedstorage/middleware/pub/push/scoreradar/stats
 ILIGAHOME=/home/iliga
 DOWNLOAD_DIR=./tmp/s3feeds
 
 COMMAND="sudo mkdir -p $ILIGAHOME/tmp_feeds && \
-		sudo mv /home/$USER/tmp_feeds/*.xml $ILIGAHOME/tmp_feeds && \
+		sudo mv ~/tmp_feeds/*.xml $ILIGAHOME/tmp_feeds && \
 		sudo chown iliga:iliga $ILIGAHOME/tmp_feeds/*.xml && \
 		sudo mv $ILIGAHOME/tmp_feeds/*.xml $WATCHING_FOLDER && \
 		sleep 1 && \
@@ -38,10 +37,10 @@ else
 	read -p "Do you want to upload these files to the ftp_receiver server? (y/n): " -r
 	if [[ "$REPLY" = "y" ]]
 	then
-		echo "2) Uploading files ssh $USER@$FTP_RECEIVER_IP" && \
-		rsync -v -r $DOWNLOAD_DIR/*.xml $USER@$FTP_RECEIVER_IP:/home/$USER/tmp_feeds && \
+		echo "2) Uploading files ssh $FTP_RECEIVER_IP" && \
+		rsync -v -r $DOWNLOAD_DIR/*.xml $FTP_RECEIVER_IP:~/tmp_feeds && \
 		echo "3) Moving files to $WATCHING_FOLDER"  && \
-		ssh $USER@$FTP_RECEIVER_IP $COMMAND
+		ssh $FTP_RECEIVER_IP $COMMAND
 	fi
 	echo "4) Finish"
 

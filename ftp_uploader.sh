@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 USAGE='
-	This script downloads file from amazon s3 and upload them to ftp_receiver server.
+	This script downloads files from amazon s3 and upload them to ftp_receiver server.
 
 	USAGE:
 		./ftp_uploader.sh "FTP_RECEIVER_IP" "prefix" "competition name"
@@ -20,7 +20,7 @@ COMMAND="sudo mkdir -p $ILIGAHOME/tmp_feeds && \
 		sudo chown iliga:iliga $ILIGAHOME/tmp_feeds/*.xml && \
 		sudo mv $ILIGAHOME/tmp_feeds/*.xml $WATCHING_FOLDER && \
 		sleep 1 && \
-		echo 'Number of files in watching folder after 1 second:' && \
+		echo 'Number of files in the watching folder after 1 second:' && \
 		sudo ls -lA $WATCHING_FOLDER | wc -l && \
 		sleep 5 && \
 		echo 'Number of files in the watching folder after 5 seconds:' && \
